@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -36,13 +37,39 @@ type FileStreamReader interface {
 	io.ReadSeekCloser
 }
 
+func fileStreamDir() string {
+	return filepath.Join(os.TempDir(), "seanime", "filestream")
+}
+
+// ClearFileStreamCache removes cache files left behind by streams that were never closed (e.g. the server was killed during playback).
+func ClearFileStreamCache(logger *zerolog.Logger) {
+	dir := fileStreamDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			logger.Warn().Err(err).Str("path", path).Msg("httputil: Failed to remove stale FileStream cache")
+			continue
+		}
+		logger.Debug().Str("path", path).Msg("httputil: Removed stale FileStream cache")
+	}
+}
+
 // NewFileStream creates a new FileStream instance with a temporary file
 func NewFileStream(ctx context.Context, logger *zerolog.Logger, contentLength int64) (*FileStream, error) {
 	if ctx == nil {
 		return nil, errors.New("context is required")
 	}
 
-	file, err := os.CreateTemp("", "filestream_*.tmp")
+	dir := fileStreamDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+
+	file, err := os.CreateTemp(dir, "filestream_*.tmp")
 	if err != nil {
 		return nil, err
 	}
